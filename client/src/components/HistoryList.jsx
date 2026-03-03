@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Copy, Edit, FileImage, Paperclip, Search, Trash2Icon } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, Edit, FileImage, Paperclip, Search, Trash2, Trash2Icon } from "lucide-react";
 import { convertLinksToAnchor } from "../utils";
 
 const PAGE_SIZE = 10;
 
-function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy }) {
+function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy, onDelete }) {
     const dm = isDarkMode;
 
     return (
-        <li className={`flex relative justify-between items-start gap-2 p-3 pb-7 rounded-xl transition-all
+        <li className={`flex flex-col relative gap-1 p-3 pb-2 rounded-xl transition-all
             ${dm
                 ? "bg-[#0d1117] border border-[#30363d] hover:border-[#3d4d5e]"
                 : "bg-gray-50 border border-gray-100 hover:border-gray-200"}`}>
-            <div className="flex gap-2 items-start flex-1 min-w-0">
+
+            {/* Top row: expand + text (full width) */}
+            <div className="flex gap-2 items-start w-full min-w-0">
                 <button
                     aria-label="Expand Content"
                     className={`mt-0.5 shrink-0 transition-colors ${dm ? "text-blue-400" : "text-blue-500"}`}
@@ -23,7 +25,7 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy })
                 <div className="flex flex-col flex-1 min-w-0">
                     <p
                         onClick={onToggle}
-                        className={`text-sm cursor-pointer word-wrap link-wrap leading-relaxed
+                        className={`text-sm cursor-pointer word-wrap link-wrap leading-relaxed whitespace-pre-wrap break-words
                             ${isExpanded ? "" : "line-clamp-2"}
                             ${dm ? "text-gray-300" : "text-gray-600"}`}
                         dangerouslySetInnerHTML={{
@@ -56,35 +58,47 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy })
                 </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-                <button
-                    aria-label="Edit Clipboard"
-                    title="Edit"
-                    className={`p-1.5 rounded-lg transition-all active:scale-95
-                        ${dm ? "text-emerald-400 hover:bg-emerald-500/10" : "text-emerald-600 hover:bg-emerald-50"}`}
-                    onClick={onEdit}
-                >
-                    <Edit size={15} />
-                </button>
-                <button
-                    aria-label="Copy Content"
-                    title="Copy"
-                    className={`p-1.5 rounded-lg transition-all active:scale-95
-                        ${dm ? "text-blue-400 hover:bg-blue-500/10" : "text-blue-600 hover:bg-blue-50"}`}
-                    onClick={onCopy}
-                >
-                    <Copy size={15} />
-                </button>
+            {/* Bottom row: timestamp left, actions right */}
+            <div className="flex items-center justify-between mt-1 pl-6">
+                <p className={`text-[10px] ${dm ? "text-gray-600" : "text-gray-400"}`}>
+                    {new Date(item.created_at).toLocaleString([], { hour: '2-digit', minute: '2-digit', hour12: true, month: 'short', day: 'numeric', year: 'numeric' })}
+                </p>
+                <div className="flex items-center gap-1">
+                    {/* Copy first = most prominent */}
+                    <button
+                        aria-label="Copy Content"
+                        title="Copy"
+                        className={`p-1.5 rounded-lg transition-all active:scale-95
+                            ${dm ? "text-blue-400 hover:bg-blue-500/10" : "text-blue-600 hover:bg-blue-50"}`}
+                        onClick={onCopy}
+                    >
+                        <Copy size={15} />
+                    </button>
+                    <button
+                        aria-label="Edit Clipboard"
+                        title="Edit"
+                        className={`p-1.5 rounded-lg transition-all active:scale-95
+                            ${dm ? "text-emerald-400 hover:bg-emerald-500/10" : "text-emerald-600 hover:bg-emerald-50"}`}
+                        onClick={onEdit}
+                    >
+                        <Edit size={15} />
+                    </button>
+                    <button
+                        aria-label="Delete Item"
+                        title="Delete"
+                        className={`p-1.5 rounded-lg transition-all active:scale-95
+                            ${dm ? "text-red-400 hover:bg-red-500/10" : "text-red-500 hover:bg-red-50"}`}
+                        onClick={onDelete}
+                    >
+                        <Trash2 size={15} />
+                    </button>
+                </div>
             </div>
-
-            <p className={`text-[10px] absolute bottom-2 right-3 ${dm ? "text-gray-600" : "text-gray-400"}`}>
-                {new Date(item.created_at).toLocaleString()}
-            </p>
         </li>
     );
 }
 
-export default function HistoryList({ history, isDarkMode, onEdit, onCopy, onDeleteAll }) {
+export default function HistoryList({ history, isDarkMode, onEdit, onCopy, onDelete, onDeleteAll }) {
     const dm = isDarkMode;
 
     const [searchKeyword, setSearchKeyword] = useState("");
@@ -141,7 +155,7 @@ export default function HistoryList({ history, isDarkMode, onEdit, onCopy, onDel
     if (history.length === 0) return null;
 
     return (
-        <div className={`max-w-2xl xl:max-w-3xl w-full shadow-xl rounded-2xl md:p-7 p-4 mt-5
+        <div className={`max-w-2xl lg:max-w-3xl xl:max-w-4xl w-full shadow-xl rounded-2xl md:p-7 p-4 mt-5
             ${dm ? "bg-[#161b22] border border-[#30363d]" : "bg-white border border-gray-200/80"}`}>
 
             {/* Header */}
@@ -194,6 +208,7 @@ export default function HistoryList({ history, isDarkMode, onEdit, onCopy, onDel
                         onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
                         onEdit={() => onEdit(item.id)}
                         onCopy={() => onCopy(item.content)}
+                        onDelete={() => onDelete(item.id)}
                     />
                 ))}
             </ul>

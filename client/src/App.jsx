@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import toast, { Toaster } from "react-hot-toast";
-import CountUp from "react-countup";
 import { useQuery } from "@tanstack/react-query";
 import "./App.css";
 
@@ -22,6 +21,8 @@ export default function App() {
     const [history, setHistory] = useState([]);
     const [deleteOne, setDeleteOne] = useState(false);
     const [fileUrl, setFileUrl] = useState(null);
+    const [isJoining, setIsJoining] = useState(false);
+    const [isSending, setIsSending] = useState(false);
     const [totalVisitor, setTotalVisitor] = useState(0);
     const [uniqueVisitor, setUniqueVisitor] = useState(0);
     const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -31,6 +32,8 @@ export default function App() {
     const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
     const textareaRef = useRef(null);
+    // True while THIS device is mid-insert so we can distinguish own vs remote sync
+    const isSendingRef = useRef(false);
 
     const dm = isDarkMode;
 
@@ -90,7 +93,11 @@ export default function App() {
             .on("postgres_changes", { event: "*", schema: "public", table: "clipboard" }, (payload) => {
                 if (payload.new.session_code === sessionCode && payload.eventType === "INSERT") {
                     setHistory((prev) => [payload.new, ...prev]);
-                    setClipboard("");
+                    // Only clear the textarea when this device sent the update
+                    if (isSendingRef.current) {
+                        setClipboard("");
+                        isSendingRef.current = false;
+                    }
                 }
                 if (payload.eventType === "DELETE") {
                     if (deleteOne) {
@@ -109,28 +116,38 @@ export default function App() {
     const joinSession = async () => {
         if (!inputCode.trim()) return toast.error("Please enter a session code");
 
+        setIsJoining(true);
+        const toastId = toast.loading("Checking session...");
+
         const { data: sessionData, error: sessionError } = await supabase
             .from("sessions").select("*").eq("code", inputCode.toUpperCase());
 
         if (sessionData.length === 0 || sessionError) {
-            toast.error("This session code does not exist. Please enter a valid code.");
+            toast.error("Session code not found. Please enter a valid code.", { id: toastId });
+            setIsJoining(false);
             return;
         }
 
         setSessionCode(inputCode.toUpperCase());
         localStorage.setItem("sessionCode", inputCode.toUpperCase());
 
+        toast.loading("Fetching clipboard history...", { id: toastId });
         const { data, error } = await supabase
             .from("clipboard").select("*")
             .eq("session_code", inputCode.toUpperCase())
             .order("created_at", { ascending: false });
 
-        if (error) { toast.error("An error occurred while fetching clipboard history"); return; }
+        if (error) {
+            toast.error("Failed to fetch clipboard history.", { id: toastId });
+            setIsJoining(false);
+            return;
+        }
 
-        toast.success(`Joined session ${inputCode.toUpperCase()} successfully!`);
+        toast.success(`Joined session ${inputCode.toUpperCase()}!`, { id: toastId });
         setInputCode("");
         setClipboard("");
         setHistory(data);
+        setIsJoining(false);
     };
 
     const handleLeaveSession = () => {
@@ -172,29 +189,42 @@ export default function App() {
         if (!clipboard && !fileUrl) return toast.error("Please enter some text to update clipboard");
         if (clipboard.length > 15000) return toast.error("Clipboard content is too long. Please keep it under 15000 characters.");
 
-        let firstTime = false;
-        if (!sessionCode) { await createSession(setSessionCode); firstTime = true; }
+        setIsSending(true);
+        const toastId = toast.loading("Sending to clipboard...");
 
-        const code = localStorage.getItem("sessionCode");
-        await supabase.from("clipboard").insert([{
-            session_code: code,
-            content: clipboard,
-            fileUrl: fileUrl ? fileUrl.url : null,
-            file: fileUrl ? fileUrl : null,
-            sensitive: isSensitive,
-        }]);
+        try {
+            let firstTime = false;
+            if (!sessionCode) { await createSession(setSessionCode); firstTime = true; }
 
-        if (history.length === 0 && firstTime) {
-            const { data, error: fetchError } = await supabase
-                .from("clipboard").select("*").eq("session_code", code).order("created_at", { ascending: false });
-            if (!fetchError) setHistory(data);
+            isSendingRef.current = true;
+            const code = localStorage.getItem("sessionCode");
+            const { error } = await supabase.from("clipboard").insert([{
+                session_code: code,
+                content: clipboard,
+                fileUrl: fileUrl ? fileUrl.url : null,
+                file: fileUrl ? fileUrl : null,
+                sensitive: isSensitive,
+            }]);
+
+            if (error) throw error;
+
+            if (history.length === 0 && firstTime) {
+                const { data, error: fetchError } = await supabase
+                    .from("clipboard").select("*").eq("session_code", code).order("created_at", { ascending: false });
+                if (!fetchError) setHistory(data);
+            }
+
+            setFileUrl(null);
+            setClipboard("");
+            sessionStorage.removeItem("clipboard");
+            setIsSensitive(false);
+            toast.success("Sent!", { id: toastId });
+        } catch {
+            isSendingRef.current = false;
+            toast.error("Failed to send. Please try again.", { id: toastId });
+        } finally {
+            setIsSending(false);
         }
-
-        setFileUrl(null);
-        setClipboard("");
-        sessionStorage.removeItem("clipboard");
-        setIsSensitive(false);
-        toast.success("Clipboard updated successfully!");
     };
 
     // ─── Paste from OS clipboard ──────────────────────────────────────────────────
@@ -209,14 +239,13 @@ export default function App() {
 
     // ─── Edit history item ────────────────────────────────────────────────────────
     const handleEdit = async (id) => {
+        const toastId = toast.loading("Loading to editor...");
         setDeleteOne(true);
         const item = history.find((i) => i.id === id);
         setClipboard(item.content);
         setFileUrl(item.file);
-        // await supabase.from("clipboard").delete().eq("id", id);
-        // setHistory((prev) => prev.filter((i) => i.id !== id));
         setDeleteOne(false);
-        toast.success("Clipboard content added to editor!");
+        toast.success("Ready to edit!", { id: toastId });
         setTimeout(() => {
             textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
             textareaRef.current?.focus();
@@ -228,17 +257,37 @@ export default function App() {
         toast.success("Text copied to clipboard!");
     };
 
+    // ─── Delete one ───────────────────────────────────────────────────────────────
+    const handleDeleteOne = async (id) => {
+        const toastId = toast.loading("Deleting...");
+        try {
+            const item = history.find((i) => i.id === id);
+            if (item?.file) await supabase.storage.from("clipboard").remove([item.file.name]);
+            const { error } = await supabase.from("clipboard").delete().eq("id", id);
+            if (error) throw error;
+            setHistory((prev) => prev.filter((i) => i.id !== id));
+            toast.success("Deleted!", { id: toastId });
+        } catch {
+            toast.error("Failed to delete.", { id: toastId });
+        }
+    };
+
     // ─── Delete all ───────────────────────────────────────────────────────────────
     const deleteAll = async () => {
         if (!confirm("Are you sure you want to clear clipboards?")) return;
         if (history.length === 0) return toast.error("No items in your clipboard history");
-        history.forEach(async (item) => {
-            if (item.file) await supabase.storage.from("clipboard").remove([item.file.name]);
-        });
-        const { error } = await supabase.from("clipboard").delete().eq("session_code", sessionCode);
-        if (error) { toast.error("An error occurred while deleting clipboard history"); return; }
-        setHistory([]);
-        toast.success("Clipboard history deleted successfully!");
+        const toastId = toast.loading("Clearing all items...");
+        try {
+            history.forEach(async (item) => {
+                if (item.file) await supabase.storage.from("clipboard").remove([item.file.name]);
+            });
+            const { error } = await supabase.from("clipboard").delete().eq("session_code", sessionCode);
+            if (error) throw error;
+            setHistory([]);
+            toast.success("Clipboard history cleared!", { id: toastId });
+        } catch {
+            toast.error("Failed to clear history.", { id: toastId });
+        }
     };
 
     // ─── Visitor counter ──────────────────────────────────────────────────────────
@@ -305,10 +354,15 @@ export default function App() {
                 }}
             />
 
-            <TopBar isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} />
+            <TopBar
+                isDarkMode={isDarkMode}
+                toggleDarkMode={toggleDarkMode}
+                uniqueVisitor={uniqueVisitor}
+                totalVisitor={totalVisitor}
+            />
 
             {/* Main Card */}
-            <div className={`max-w-2xl xl:max-w-3xl w-full shadow-xl rounded-2xl md:p-7 p-4 space-y-5
+            <div className={`max-w-2xl lg:max-w-3xl xl:max-w-4xl w-full shadow-xl rounded-2xl md:p-7 p-4 space-y-5
                 ${dm ? "bg-[#161b22] border border-[#30363d]" : "bg-white border border-gray-200/80"}`}>
 
                 {/* Header */}
@@ -343,6 +397,7 @@ export default function App() {
                     setInputCode={setInputCode}
                     onSubmit={async (e) => { e.preventDefault(); await joinSession(); }}
                     isDarkMode={isDarkMode}
+                    isLoading={isJoining}
                 />
 
                 <ClipboardEditor
@@ -357,6 +412,7 @@ export default function App() {
                     onUploadFile={uploadFile}
                     onSend={updateClipboard}
                     onPaste={pasteFromClipboard}
+                    isSending={isSending}
                 />
             </div>
 
@@ -365,31 +421,16 @@ export default function App() {
                 isDarkMode={isDarkMode}
                 onEdit={handleEdit}
                 onCopy={copyToClipboard}
+                onDelete={handleDeleteOne}
                 onDeleteAll={deleteAll}
             />
 
             {/* Footer */}
             <footer className={`mt-6 text-center text-xs ${dm ? "text-gray-600" : "text-gray-400"}`}>
-                <div className="flex flex-col items-center gap-3">
-                    <div className={`border px-5 py-2 rounded-xl flex gap-4 text-xs
-                        ${dm ? "bg-[#161b22] border-[#30363d]" : "bg-white border-gray-200"}`}>
-                        <div className="flex items-center gap-1.5">
-                            <span className={dm ? "text-gray-500" : "text-gray-400"}>Unique:</span>
-                            <span className="text-blue-500 font-medium"><CountUp end={uniqueVisitor} enableScrollSpy /></span>
-                        </div>
-                        <div className={`w-px ${dm ? "bg-[#30363d]" : "bg-gray-200"}`} />
-                        <div className="flex items-center gap-1.5">
-                            <span className={dm ? "text-gray-500" : "text-gray-400"}>Total:</span>
-                            <span className="text-blue-500 font-medium"><CountUp end={totalVisitor} enableScrollSpy /></span>
-                        </div>
-                    </div>
-                    <div>
-                        Made with ❤️ by{" "}
-                        <a href="https://sudhanshur.vercel.app" target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">
-                            Sudhanshu Ranjan
-                        </a>
-                    </div>
-                </div>
+                Made with ❤️ by{" "}
+                <a href="https://sudhanshur.vercel.app" target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">
+                    Sudhanshu Ranjan
+                </a>
             </footer>
         </div>
     );

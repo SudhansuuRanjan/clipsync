@@ -14,6 +14,7 @@ export default function ClipboardEditor({
     onUploadFile,
     onSend,
     onPaste,
+    isSending,
 }) {
     const dm = isDarkMode;
 
@@ -135,25 +136,31 @@ export default function ClipboardEditor({
             {/* Action buttons */}
             <div className="flex gap-2 flex-wrap">
                 <button
-                    className={`flex-1 min-w-28 flex items-center justify-center gap-2 text-sm font-medium py-2.5 rounded-xl transition-all hover:scale-[102%] active:scale-95 shadow-sm
+                    disabled={isSending}
+                    className={`flex-1 min-w-28 flex items-center justify-center gap-2 text-sm font-medium py-2.5 rounded-xl transition-all hover:scale-[102%] active:scale-95 shadow-sm disabled:opacity-50 disabled:pointer-events-none
                         ${dm ? "bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/20" : "bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200"}`}
                     onClick={onPaste}
                 >
                     <ClipboardList size={16} /> Paste Text
                 </button>
                 <button
-                    className={`flex-1 min-w-28 flex items-center justify-center gap-2 text-sm font-medium py-2.5 rounded-xl transition-all hover:scale-[102%] active:scale-95 shadow-sm
+                    disabled={isSending}
+                    className={`flex-1 min-w-28 flex items-center justify-center gap-2 text-sm font-medium py-2.5 rounded-xl transition-all hover:scale-[102%] active:scale-95 shadow-sm disabled:opacity-50 disabled:pointer-events-none
                         ${dm ? "bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/20" : "bg-red-50 hover:bg-red-100 text-red-600 border border-red-200"}`}
                     onClick={handleClear}
                 >
                     <Trash2 size={16} /> Clear
                 </button>
                 <button
-                    className={`flex-1 min-w-40 flex items-center justify-center gap-2 text-sm font-semibold py-2.5 rounded-xl transition-all hover:scale-[102%] active:scale-95 shadow-sm
+                    disabled={isSending}
+                    className={`flex-1 min-w-40 flex items-center justify-center gap-2 text-sm font-semibold py-2.5 rounded-xl transition-all hover:scale-[102%] active:scale-95 shadow-sm disabled:opacity-60 disabled:pointer-events-none
                         ${dm ? "bg-emerald-500 hover:bg-emerald-400 text-gray-900" : "bg-emerald-600 hover:bg-emerald-500 text-white"}`}
                     onClick={onSend}
                 >
-                    <Send size={16} /> Send to Clipboard
+                    {isSending
+                        ? <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> Sending...</>
+                        : <><Send size={16} /> Send to Clipboard</>
+                    }
                 </button>
             </div>
         </div>
