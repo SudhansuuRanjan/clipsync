@@ -19,8 +19,8 @@ export default function App() {
     const [clipboard, setClipboard] = useState(sessionStorage.getItem("clipboard") || "");
     const [isSensitive, setIsSensitive] = useState(false);
     const [history, setHistory] = useState([]);
-    const [deleteOne, setDeleteOne] = useState(false);
     const [fileUrl, setFileUrl] = useState(null);
+    const [isHistoryLoading, setIsHistoryLoading] = useState(false);
     const [isJoining, setIsJoining] = useState(false);
     const [isSending, setIsSending] = useState(false);
     const [totalVisitor, setTotalVisitor] = useState(0);
@@ -47,17 +47,20 @@ export default function App() {
     };
 
     // ─── Online / Offline ────────────────────────────────────────────────────────
-    const fetchClipboardHistory = async () => {
-        if (!sessionCode) return;
+    const fetchHistory = async (code) => {
+        if (!code) return;
+        setIsHistoryLoading(true);
         const { data, error } = await supabase
             .from("clipboard")
             .select("*")
-            .eq("session_code", sessionCode);
+            .eq("session_code", code.toUpperCase())
+            .order("created_at", { ascending: false });
         if (!error) setHistory(data || []);
+        setIsHistoryLoading(false);
     };
 
     useEffect(() => {
-        const handleOnline = () => { setIsOffline(false); setTimeout(fetchClipboardHistory, 100); };
+        const handleOnline = () => { setIsOffline(false); setTimeout(() => fetchHistory(sessionCode), 100); };
         const handleOffline = () => setIsOffline(true);
         window.addEventListener("online", handleOnline);
         window.addEventListener("offline", handleOffline);
@@ -65,25 +68,19 @@ export default function App() {
             window.removeEventListener("online", handleOnline);
             window.removeEventListener("offline", handleOffline);
         };
-    }, []);
+    }, [sessionCode]);
 
-    // ─── Initial session restore ─────────────────────────────────────────────────
+    // ─── Restore session on mount ────────────────────────────────────────────────
     useEffect(() => {
         const stored = localStorage.getItem("sessionCode");
-        if (stored) {
-            setSessionCode(stored);
-            (async () => {
-                const { data, error } = await supabase
-                    .from("clipboard")
-                    .select("*")
-                    .eq("session_code", stored.toUpperCase())
-                    .order("created_at", { ascending: false });
-                if (error) { toast.error("An error occurred while fetching clipboard history"); return; }
-                setHistory(data);
-            })();
-        }
-        console.clear();
+        if (stored) setSessionCode(stored.toUpperCase());
     }, []);
+
+    // ─── Fetch history whenever session code is set ──────────────────────────────
+    useEffect(() => {
+        if (!sessionCode) return;
+        fetchHistory(sessionCode);
+    }, [sessionCode]);
 
     // ─── Real-time subscription ──────────────────────────────────────────────────
     useEffect(() => {
@@ -91,7 +88,7 @@ export default function App() {
         const channel = supabase
             .channel("clipboard")
             .on("postgres_changes", { event: "*", schema: "public", table: "clipboard" }, (payload) => {
-                if (payload.new.session_code === sessionCode && payload.eventType === "INSERT") {
+                if (payload.new?.session_code === sessionCode && payload.eventType === "INSERT") {
                     setHistory((prev) => [payload.new, ...prev]);
                     // Only clear the textarea when this device sent the update
                     if (isSendingRef.current) {
@@ -100,15 +97,10 @@ export default function App() {
                     }
                 }
                 if (payload.eventType === "DELETE") {
-                    if (deleteOne) {
-                        setHistory([]);
-                    } else {
-                        setHistory((prev) => prev.filter((item) => item.id !== payload.old.id));
-                    }
+                    setHistory((prev) => prev.filter((item) => item.id !== payload.old.id));
                 }
             })
             .subscribe();
-        console.clear();
         return () => supabase.removeChannel(channel);
     }, [sessionCode, isOffline]);
 
@@ -240,11 +232,9 @@ export default function App() {
     // ─── Edit history item ────────────────────────────────────────────────────────
     const handleEdit = async (id) => {
         const toastId = toast.loading("Loading to editor...");
-        setDeleteOne(true);
         const item = history.find((i) => i.id === id);
         setClipboard(item.content);
         setFileUrl(item.file);
-        setDeleteOne(false);
         toast.success("Ready to edit!", { id: toastId });
         setTimeout(() => {
             textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -419,6 +409,7 @@ export default function App() {
             <HistoryList
                 history={history}
                 isDarkMode={isDarkMode}
+                isLoading={isHistoryLoading}
                 onEdit={handleEdit}
                 onCopy={copyToClipboard}
                 onDelete={handleDeleteOne}

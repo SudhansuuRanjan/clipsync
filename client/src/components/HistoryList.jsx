@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Copy, Edit, FileImage, Paperclip, Search, Trash2, Trash2Icon } from "lucide-react";
-import { convertLinksToAnchor } from "../utils";
+import { convertLinksToAnchor, plainTextPreview } from "../utils";
 
 const PAGE_SIZE = 10;
 
@@ -25,15 +25,13 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy, o
                 <div className="flex flex-col flex-1 min-w-0">
                     <p
                         onClick={onToggle}
-                        className={`text-sm cursor-pointer word-wrap link-wrap leading-relaxed whitespace-pre-wrap break-words
+                        className={`text-sm cursor-pointer word-wrap link-wrap leading-relaxed break-words
                             ${isExpanded ? "" : "line-clamp-2"}
                             ${dm ? "text-gray-300" : "text-gray-600"}`}
                         dangerouslySetInnerHTML={{
                             __html: isExpanded
                                 ? convertLinksToAnchor(item.content, item)
-                                : item.content.length > 160
-                                    ? convertLinksToAnchor(item.content.substring(0, 160), item) + "..."
-                                    : convertLinksToAnchor(item.content.substring(0, 160), item),
+                                : plainTextPreview(item.content, 160),
                         }}
                     />
 
@@ -98,7 +96,7 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy, o
     );
 }
 
-export default function HistoryList({ history, isDarkMode, onEdit, onCopy, onDelete, onDeleteAll }) {
+export default function HistoryList({ history, isDarkMode, isLoading, onEdit, onCopy, onDelete, onDeleteAll }) {
     const dm = isDarkMode;
 
     const [searchKeyword, setSearchKeyword] = useState("");
@@ -151,6 +149,22 @@ export default function HistoryList({ history, isDarkMode, onEdit, onCopy, onDel
     }, [visibleCount, searchResults.length, loadMore]);
 
     const visibleResults = searchResults.slice(0, visibleCount);
+
+    if (isLoading) {
+        return (
+            <div className={`max-w-2xl lg:max-w-3xl xl:max-w-4xl w-full shadow-xl rounded-2xl md:p-7 p-4 mt-5
+                ${dm ? "bg-[#161b22] border border-[#30363d]" : "bg-white border border-gray-200/80"}`}>
+                <div className={`h-5 w-36 rounded-lg mb-1 animate-pulse ${dm ? "bg-gray-800" : "bg-gray-200"}`} />
+                <div className={`h-3 w-16 rounded mb-5 animate-pulse ${dm ? "bg-gray-800" : "bg-gray-200"}`} />
+                <div className={`h-9 w-full rounded-xl mb-5 animate-pulse ${dm ? "bg-gray-800" : "bg-gray-200"}`} />
+                <div className="space-y-2">
+                    {[1, 2, 3].map(i => (
+                        <div key={i} className={`h-16 w-full rounded-xl animate-pulse ${dm ? "bg-gray-800" : "bg-gray-100"}`} />
+                    ))}
+                </div>
+            </div>
+        );
+    }
 
     if (history.length === 0) return null;
 
