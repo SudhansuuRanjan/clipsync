@@ -31,7 +31,9 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy, o
                         dangerouslySetInnerHTML={{
                             __html: isExpanded
                                 ? convertLinksToAnchor(item.content, item)
-                                : plainTextPreview(item.content, 160),
+                                : item.sensitive
+                                    ? "**********************"
+                                    : plainTextPreview(item.content, 160),
                         }}
                     />
 
