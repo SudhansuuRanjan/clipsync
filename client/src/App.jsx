@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import toast, { Toaster } from "react-hot-toast";
-import { useQuery } from "@tanstack/react-query";
 import "./App.css";
 
-import supabase from "./config/supabase";
-import { createSession } from "./service/doc.service";
+import {
+    createSession,
+    createEntry,
+    deleteEntry,
+    clearEntries,
+    listEntries,
+    verifySession,
+    uploadFile,
+    getStats,
+    trackStats,
+    openRealtimeSocket,
+} from "./service/api";
 import { compressImage } from "./compressedFileUpload";
 
 import TopBar from "./components/TopBar";
@@ -12,6 +21,8 @@ import SessionBadge from "./components/SessionBadge";
 import JoinSessionForm from "./components/JoinSessionForm";
 import ClipboardEditor from "./components/ClipboardEditor";
 import HistoryList from "./components/HistoryList";
+
+const MAX_TEXT = 15000;
 
 export default function App() {
     const [sessionCode, setSessionCode] = useState("");
@@ -50,13 +61,14 @@ export default function App() {
     const fetchHistory = async (code) => {
         if (!code) return;
         setIsHistoryLoading(true);
-        const { data, error } = await supabase
-            .from("clipboard")
-            .select("*")
-            .eq("session_code", code.toUpperCase())
-            .order("created_at", { ascending: false });
-        if (!error) setHistory(data || []);
-        setIsHistoryLoading(false);
+        try {
+            const data = await listEntries(code);
+            setHistory(data || []);
+        } catch {
+            toast.error("Failed to fetch clipboard history.");
+        } finally {
+            setIsHistoryLoading(false);
+        }
     };
 
     useEffect(() => {
@@ -82,27 +94,27 @@ export default function App() {
         fetchHistory(sessionCode);
     }, [sessionCode]);
 
-    // ─── Real-time subscription ──────────────────────────────────────────────────
+    // ─── Real-time subscription (Workers WebSocket) ──────────────────────────────
     useEffect(() => {
         if (!sessionCode) return;
-        const channel = supabase
-            .channel("clipboard")
-            .on("postgres_changes", { event: "*", schema: "public", table: "clipboard" }, (payload) => {
-                if (payload.new?.session_code === sessionCode && payload.eventType === "INSERT") {
-                    setHistory((prev) => [payload.new, ...prev]);
-                    // Only clear the textarea when this device sent the update
-                    if (isSendingRef.current) {
-                        setClipboard("");
-                        isSendingRef.current = false;
-                    }
+        const close = openRealtimeSocket(sessionCode, (event) => {
+            if (event.type === "entry:new") {
+                setHistory((prev) => [event.entry, ...prev.filter((e) => e.id !== event.entry.id)]);
+                if (isSendingRef.current) {
+                    setClipboard("");
+                    setFileUrl(null);
+                    setIsSensitive(false);
+                    sessionStorage.removeItem("clipboard");
+                    isSendingRef.current = false;
                 }
-                if (payload.eventType === "DELETE") {
-                    setHistory((prev) => prev.filter((item) => item.id !== payload.old.id));
-                }
-            })
-            .subscribe();
-        return () => supabase.removeChannel(channel);
-    }, [sessionCode, isOffline]);
+            } else if (event.type === "entry:delete") {
+                setHistory((prev) => prev.filter((e) => e.id !== event.id));
+            } else if (event.type === "entries:clear") {
+                setHistory([]);
+            }
+        });
+        return close;
+    }, [sessionCode]);
 
     // ─── Session join ────────────────────────────────────────────────────────────
     const joinSession = async () => {
@@ -111,35 +123,28 @@ export default function App() {
         setIsJoining(true);
         const toastId = toast.loading("Checking session...");
 
-        const { data: sessionData, error: sessionError } = await supabase
-            .from("sessions").select("*").eq("code", inputCode.toUpperCase());
+        try {
+            const exists = await verifySession(inputCode.trim().toUpperCase());
+            if (!exists) {
+                toast.error("Session code not found. Please enter a valid code.", { id: toastId });
+                return;
+            }
 
-        if (sessionData.length === 0 || sessionError) {
-            toast.error("Session code not found. Please enter a valid code.", { id: toastId });
+            const code = inputCode.trim().toUpperCase();
+            setSessionCode(code);
+            localStorage.setItem("sessionCode", code);
+
+            toast.loading("Fetching clipboard history...", { id: toastId });
+            const data = await listEntries(code);
+            toast.success(`Joined session ${code}!`, { id: toastId });
+            setInputCode("");
+            setClipboard("");
+            setHistory(data);
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Failed to join session.", { id: toastId });
+        } finally {
             setIsJoining(false);
-            return;
         }
-
-        setSessionCode(inputCode.toUpperCase());
-        localStorage.setItem("sessionCode", inputCode.toUpperCase());
-
-        toast.loading("Fetching clipboard history...", { id: toastId });
-        const { data, error } = await supabase
-            .from("clipboard").select("*")
-            .eq("session_code", inputCode.toUpperCase())
-            .order("created_at", { ascending: false });
-
-        if (error) {
-            toast.error("Failed to fetch clipboard history.", { id: toastId });
-            setIsJoining(false);
-            return;
-        }
-
-        toast.success(`Joined session ${inputCode.toUpperCase()}!`, { id: toastId });
-        setInputCode("");
-        setClipboard("");
-        setHistory(data);
-        setIsJoining(false);
     };
 
     const handleLeaveSession = () => {
@@ -149,27 +154,25 @@ export default function App() {
         localStorage.removeItem("sessionCode");
         sessionStorage.removeItem("clipboard");
         setHistory([]);
+        setClipboard("");
+        setFileUrl(null);
     };
 
     // ─── File upload ─────────────────────────────────────────────────────────────
-    const uploadFile = async (file, type = "file") => {
+    const uploadFileHandler = async (file, type = "file") => {
         if (!file) return toast.error("Please select a file to upload");
         if (file.size > 10 * 1024 * 1024) return toast.error("File size exceeds 10MB. Please upload a smaller file.");
 
-        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        const random = Array.from({ length: 3 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
         const toastId = toast.loading("Uploading file...");
 
-        if (file.type.includes("image")) {
+        if (type === "image" || file.type.startsWith("image/")) {
             try { file = await compressImage(file); }
-            catch { return toast.error("An error occurred while compressing image"); }
+            catch { return toast.error("An error occurred while compressing image", { id: toastId }); }
         }
 
         try {
-            const { data, error } = await supabase.storage.from("clipboard").upload(`files/${random + file.name}`, file);
-            if (error) throw error;
-            const url = `https://qthpintkaihcmklahkwf.supabase.co/storage/v1/object/public/${data.fullPath}`;
-            setFileUrl({ url, ...data, type });
+            const attachment = await uploadFile(file);
+            setFileUrl(attachment);
             toast.success("File uploaded successfully!", { id: toastId });
         } catch {
             toast.error("An error occurred while uploading file", { id: toastId });
@@ -179,41 +182,36 @@ export default function App() {
     // ─── Send clipboard ───────────────────────────────────────────────────────────
     const updateClipboard = async () => {
         if (!clipboard && !fileUrl) return toast.error("Please enter some text to update clipboard");
-        if (clipboard.length > 15000) return toast.error("Clipboard content is too long. Please keep it under 15000 characters.");
+        if (clipboard.length > MAX_TEXT) return toast.error(`Clipboard content is too long. Please keep it under ${MAX_TEXT} characters.`);
 
         setIsSending(true);
         const toastId = toast.loading("Sending to clipboard...");
 
         try {
-            let firstTime = false;
-            if (!sessionCode) { await createSession(setSessionCode); firstTime = true; }
-
-            isSendingRef.current = true;
-            const code = localStorage.getItem("sessionCode");
-            const { error } = await supabase.from("clipboard").insert([{
-                session_code: code,
-                content: clipboard,
-                fileUrl: fileUrl ? fileUrl.url : null,
-                file: fileUrl ? fileUrl : null,
-                sensitive: isSensitive,
-            }]);
-
-            if (error) throw error;
-
-            if (history.length === 0 && firstTime) {
-                const { data, error: fetchError } = await supabase
-                    .from("clipboard").select("*").eq("session_code", code).order("created_at", { ascending: false });
-                if (!fetchError) setHistory(data);
+            let code = sessionCode;
+            if (!code) {
+                code = await createSession();
+                setSessionCode(code);
+                localStorage.setItem("sessionCode", code);
             }
 
+            isSendingRef.current = true;
+            const entry = await createEntry(code, {
+                content: clipboard,
+                sensitive: isSensitive,
+                file: fileUrl,
+            });
+
+            setHistory((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)]);
             setFileUrl(null);
             setClipboard("");
             sessionStorage.removeItem("clipboard");
             setIsSensitive(false);
-            toast.success("Sent!", { id: toastId });
-        } catch {
             isSendingRef.current = false;
-            toast.error("Failed to send. Please try again.", { id: toastId });
+            toast.success("Sent!", { id: toastId });
+        } catch (e) {
+            isSendingRef.current = false;
+            toast.error(e instanceof Error ? e.message : "Failed to send. Please try again.", { id: toastId });
         } finally {
             setIsSending(false);
         }
@@ -223,18 +221,33 @@ export default function App() {
     const pasteFromClipboard = () => {
         navigator.clipboard.readText()
             .then((text) => {
-                if (text.trim()) { setClipboard(text); toast.success("Clipboard text pasted successfully!"); }
+                if (text.trim()) { setClipboard(text); sessionStorage.setItem("clipboard", text); toast.success("Clipboard text pasted successfully!"); }
                 else alert("Clipboard is empty or contains unsupported data.");
             })
             .catch(() => alert("An error occurred while reading clipboard"));
     };
 
     // ─── Edit history item ────────────────────────────────────────────────────────
-    const handleEdit = async (id) => {
+    const handleEdit = (id) => {
         const toastId = toast.loading("Loading to editor...");
         const item = history.find((i) => i.id === id);
+        if (!item) {
+            toast.error("Item not found.", { id: toastId });
+            return;
+        }
         setClipboard(item.content);
-        setFileUrl(item.file);
+        if (item.fileKey) {
+            setFileUrl({
+                key: item.fileKey,
+                name: item.fileName || "file",
+                type: item.fileType || "application/octet-stream",
+                size: 0,
+                url: item.fileUrl || "",
+            });
+        } else {
+            setFileUrl(null);
+        }
+        setIsSensitive(item.sensitive);
         toast.success("Ready to edit!", { id: toastId });
         setTimeout(() => {
             textareaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -251,10 +264,7 @@ export default function App() {
     const handleDeleteOne = async (id) => {
         const toastId = toast.loading("Deleting...");
         try {
-            const item = history.find((i) => i.id === id);
-            if (item?.file) await supabase.storage.from("clipboard").remove([item.file.name]);
-            const { error } = await supabase.from("clipboard").delete().eq("id", id);
-            if (error) throw error;
+            await deleteEntry(sessionCode, id);
             setHistory((prev) => prev.filter((i) => i.id !== id));
             toast.success("Deleted!", { id: toastId });
         } catch {
@@ -268,11 +278,7 @@ export default function App() {
         if (history.length === 0) return toast.error("No items in your clipboard history");
         const toastId = toast.loading("Clearing all items...");
         try {
-            history.forEach(async (item) => {
-                if (item.file) await supabase.storage.from("clipboard").remove([item.file.name]);
-            });
-            const { error } = await supabase.from("clipboard").delete().eq("session_code", sessionCode);
-            if (error) throw error;
+            await clearEntries(sessionCode);
             setHistory([]);
             toast.success("Clipboard history cleared!", { id: toastId });
         } catch {
@@ -280,52 +286,30 @@ export default function App() {
         }
     };
 
-    // ─── Visitor counter ──────────────────────────────────────────────────────────
-    const getCounter = async () => {
-        const { data, error } = await supabase.from("counter").select("*");
-        if (error) return console.log(error);
-        setTotalVisitor(data[0].total);
-        setUniqueVisitor(data[0].unique);
-        return data;
-    };
-
-    const updateDocument = async (collection, id, data) => {
-        const { data: updated, error } = await supabase.from(collection).update(data).eq("id", id).select("*");
-        if (error) return console.log(error);
-        return updated;
-    };
-
-    const getVisitedCookie = () => document.cookie.split(";").some((c) => c.includes("visited"));
-
-    const setVisitedCookie = () => {
-        const date = new Date();
-        date.setTime(date.getTime() + 30 * 24 * 60 * 60 * 1000);
-        document.cookie = `visited=true; path=/; expires=${date.toUTCString()}; sameSite=strict; secure`;
-    };
-
-    const updateCounter = async () => {
-        try {
-            const res = await getCounter();
-            if (!res?.[0]) return true;
-            const visited = getVisitedCookie();
-            const data = visited
-                ? { unique: res[0].unique, total: res[0].total + 1 }
-                : { unique: res[0].unique + 1, total: res[0].total + 1 };
-            if (!visited) setVisitedCookie();
-            await updateDocument("counter", 1, data);
-        } catch { /* silent */ }
-        return true;
-    };
-
-    useQuery({
-        queryKey: ["counter"],
-        queryFn: updateCounter,
-        enabled: true,
-        refetchOnWindowFocus: false,
-        refetchOnReconnect: false,
-        retry: 2,
-        refetchInterval: 1000 * 60 * 5,
-    });
+    // ─── Visitor counter (Workers KV-backed, cookie-deduped) ─────────────────────
+    useEffect(() => {
+        const visited = document.cookie.split(";").some((c) => c.includes("visited"));
+        (async () => {
+            try {
+                const stats = await trackStats();
+                setTotalVisitor(stats.total);
+                setUniqueVisitor(stats.unique);
+                if (!visited) {
+                    const date = new Date();
+                    date.setTime(date.getTime() + 30 * 24 * 60 * 60 * 1000);
+                    document.cookie = `visited=true; path=/; expires=${date.toUTCString()}; sameSite=strict; secure`;
+                }
+            } catch {
+                try {
+                    const stats = await getStats();
+                    setTotalVisitor(stats.total);
+                    setUniqueVisitor(stats.unique);
+                } catch {
+                    // ignore
+                }
+            }
+        })();
+    }, []);
 
     // ─── Render ───────────────────────────────────────────────────────────────────
     return (
@@ -399,7 +383,7 @@ export default function App() {
                     setFileUrl={setFileUrl}
                     isDarkMode={isDarkMode}
                     textareaRef={textareaRef}
-                    onUploadFile={uploadFile}
+                    onUploadFile={uploadFileHandler}
                     onSend={updateClipboard}
                     onPaste={pasteFromClipboard}
                     isSending={isSending}

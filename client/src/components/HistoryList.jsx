@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Copy, Edit, FileImage, Paperclip, Search, Trash2, Trash2Icon } from "lucide-react";
-import { convertLinksToAnchor, plainTextPreview } from "../utils";
+import { ChevronDown, ChevronRight, Copy, Edit, FileImage, Info, Paperclip, Search, Trash2, Trash2Icon } from "lucide-react";
+import { convertLinksToAnchor, displayFileName, formatTimestamp, isImageType, plainTextPreview } from "../utils";
 
 const PAGE_SIZE = 10;
 
@@ -37,21 +37,19 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy, o
                         }}
                     />
 
-                    {item.file && (
+                    {item.fileKey && (
                         <div className={`inline-flex items-center gap-1.5 mt-2 border text-xs rounded-lg px-2 py-1 w-fit
                             ${dm ? "border-[#30363d] bg-[#1e2530] text-gray-400" : "border-gray-200 bg-gray-100 text-gray-500"}`}>
-                            {item.file.type === "file"
-                                ? <Paperclip size={12} className="text-emerald-500" />
-                                : <FileImage size={12} className="text-rose-500" />}
+                            {isImageType(item.fileType)
+                                ? <FileImage size={12} className="text-rose-500" />
+                                : <Paperclip size={12} className="text-emerald-500" />}
                             <a
                                 href={item.fileUrl}
                                 className="text-blue-400 hover:underline truncate max-w-[200px]"
                                 target="_blank"
                                 rel="noreferrer"
                             >
-                                {item.file.path.length > 34
-                                    ? item.file.path.substring(6, 10) + "..." + item.file.path.substring(item.file.path.length - 7)
-                                    : item.file.path.substring(6)}
+                                {displayFileName(item.fileName)}
                             </a>
                         </div>
                     )}
@@ -61,7 +59,7 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy, o
             {/* Bottom row: timestamp left, actions right */}
             <div className="flex items-center justify-between mt-1 pl-6">
                 <p className={`text-[10px] ${dm ? "text-gray-600" : "text-gray-400"}`}>
-                    {new Date(item.created_at).toLocaleString([], { hour: '2-digit', minute: '2-digit', hour12: true, month: 'short', day: 'numeric', year: 'numeric' })}
+                    {formatTimestamp(item.createdAt)}
                 </p>
                 <div className="flex items-center gap-1">
                     {/* Copy first = most prominent */}
@@ -211,6 +209,12 @@ export default function HistoryList({ history, isDarkMode, isLoading, onEdit, on
                     id="search_keyword"
                 />
                 <Search size={15} className="absolute top-1/2 -translate-y-1/2 left-3 text-gray-400" />
+            </div>
+
+            <div className={`flex items-center gap-1.5 text-xs mb-4 px-3 py-2 rounded-xl
+                ${dm ? "bg-blue-500/10 text-blue-300 border border-blue-500/20" : "bg-blue-50 text-blue-600 border border-blue-100"}`}>
+                <Info size={13} className="shrink-0" />
+                Items in your clipboard (text & files) are automatically deleted after 7 days.
             </div>
 
             {/* List */}

@@ -1,5 +1,4 @@
 import { ClipboardList, FileImage, FileUp, Paperclip, Send, Trash2 } from "lucide-react";
-import supabase from "../config/supabase";
 import toast from "react-hot-toast";
 
 export default function ClipboardEditor({
@@ -28,14 +27,12 @@ export default function ClipboardEditor({
             : "bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:ring-blue-300 focus:border-blue-400"}`;
 
     const handleClearFile = () => {
-        if (fileUrl) supabase.storage.from("clipboard").remove([fileUrl.name]);
         setFileUrl(null);
         toast.success("File removed successfully!");
     };
 
     const handleClear = () => {
         setClipboard("");
-        if (fileUrl) supabase.storage.from("clipboard").remove([fileUrl.name]);
         setFileUrl(null);
         toast.success("Clipboard cleared successfully!");
     };
@@ -126,7 +123,7 @@ export default function ClipboardEditor({
                 <div className={`flex gap-2 items-center p-2 py-2 rounded-xl text-sm
                     ${dm ? "bg-[#1e2530] border border-[#30363d]" : "bg-gray-100 border border-gray-200"}`}>
                     <FileUp size={16} className="text-blue-500 shrink-0" />
-                    <p className={`flex-1 truncate ${dm ? "text-gray-300" : "text-gray-700"}`}>{fileUrl.path}</p>
+                    <p className={`flex-1 truncate ${dm ? "text-gray-300" : "text-gray-700"}`}>{fileUrl.name}</p>
                     <button className="text-red-400 hover:text-red-500 active:scale-95 transition" onClick={handleClearFile}>
                         <Trash2 size={16} />
                     </button>

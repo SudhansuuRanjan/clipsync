@@ -21,3 +21,17 @@ export const plainTextPreview = (text, maxLen = 160) => {
     const flat = text.replace(/\n/g, ' ').replace(/\t/g, ' ').replace(/\s+/g, ' ').trim();
     return flat.length > maxLen ? flat.substring(0, maxLen) + '...' : flat;
 };
+
+// Format a Unix-ms timestamp into a compact local string.
+export const formatTimestamp = (ms) => {
+    if (!ms) return '';
+    return new Date(ms).toLocaleString([], { hour: '2-digit', minute: '2-digit', hour12: true, month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+// Return the file's display name, stripping the leading key + dash if present.
+export const displayFileName = (fileName) => {
+    if (!fileName) return 'file';
+    return fileName;
+};
+
+export const isImageType = (type) => Boolean(type && type.startsWith("image/"));
