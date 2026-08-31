@@ -37,22 +37,22 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy, o
                         }}
                     />
 
-                    {item.fileKey && (
-                        <div className={`inline-flex items-center gap-1.5 mt-2 border text-xs rounded-lg px-2 py-1 w-fit
+                    {(item.files || []).map((f) => (
+                        <div key={f.id} className={`inline-flex items-center gap-1.5 mt-2 border text-xs rounded-lg px-2 py-1 w-fit
                             ${dm ? "border-[#30363d] bg-[#1e2530] text-gray-400" : "border-gray-200 bg-gray-100 text-gray-500"}`}>
-                            {isImageType(item.fileType)
+                            {isImageType(f.type)
                                 ? <FileImage size={12} className="text-rose-500" />
                                 : <Paperclip size={12} className="text-emerald-500" />}
                             <a
-                                href={item.fileUrl}
+                                href={f.url}
                                 className="text-blue-400 hover:underline truncate max-w-[200px]"
                                 target="_blank"
                                 rel="noreferrer"
                             >
-                                {displayFileName(item.fileName)}
+                                {displayFileName(f.name)}
                             </a>
                         </div>
-                    )}
+                    ))}
                 </div>
             </div>
 

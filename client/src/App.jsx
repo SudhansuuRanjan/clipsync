@@ -9,7 +9,8 @@ import {
     clearEntries,
     listEntries,
     verifySession,
-    uploadFile,
+    uploadFiles,
+    claimPair,
     getStats,
     trackStats,
     openRealtimeSocket,
@@ -21,8 +22,10 @@ import SessionBadge from "./components/SessionBadge";
 import JoinSessionForm from "./components/JoinSessionForm";
 import ClipboardEditor from "./components/ClipboardEditor";
 import HistoryList from "./components/HistoryList";
+import QrDock from "./components/QrDock";
 
 const MAX_TEXT = 15000;
+const MAX_FILE = 15 * 1024 * 1024;
 
 export default function App() {
     const [sessionCode, setSessionCode] = useState("");
@@ -30,7 +33,7 @@ export default function App() {
     const [clipboard, setClipboard] = useState(sessionStorage.getItem("clipboard") || "");
     const [isSensitive, setIsSensitive] = useState(false);
     const [history, setHistory] = useState([]);
-    const [fileUrl, setFileUrl] = useState(null);
+    const [files, setFiles] = useState([]);
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
     const [isJoining, setIsJoining] = useState(false);
     const [isSending, setIsSending] = useState(false);
@@ -88,6 +91,53 @@ export default function App() {
         if (stored) setSessionCode(stored.toUpperCase());
     }, []);
 
+    // ─── Mobile handoff (QR pair code) ───────────────────────────────────────────
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const pair = params.get("pair");
+        if (!pair) return;
+
+        (async () => {
+            const stripPair = () => history.replaceState({}, "", window.location.pathname);
+            try {
+                const { sessionCode: incoming } = await claimPair(pair);
+                stripPair();
+
+                const local = localStorage.getItem("sessionCode");
+                if (local && local.toUpperCase() === incoming.toUpperCase()) {
+                    if (!sessionCode) setSessionCode(incoming.toUpperCase());
+                    return;
+                }
+                if (local) {
+                    const ok = confirm(
+                        `You are currently in session ${local.toUpperCase()}. Switch to incoming session ${incoming.toUpperCase()}?`
+                    );
+                    if (!ok) return;
+                }
+
+                const exists = await verifySession(incoming);
+                if (!exists) {
+                    toast.error("Pairing target session no longer exists.");
+                    return;
+                }
+
+                localStorage.setItem("sessionCode", incoming);
+                setSessionCode(incoming.toUpperCase());
+                setInputCode("");
+                setHistory([]);
+                setClipboard("");
+                setFiles([]);
+                setIsSensitive(false);
+                sessionStorage.removeItem("clipboard");
+                toast.success(`Switched to session ${incoming.toUpperCase()}`);
+            } catch {
+                stripPair();
+                toast.error("Pairing code expired or invalid.");
+            }
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // ─── Fetch history whenever session code is set ──────────────────────────────
     useEffect(() => {
         if (!sessionCode) return;
@@ -102,7 +152,7 @@ export default function App() {
                 setHistory((prev) => [event.entry, ...prev.filter((e) => e.id !== event.entry.id)]);
                 if (isSendingRef.current) {
                     setClipboard("");
-                    setFileUrl(null);
+                    setFiles([]);
                     setIsSensitive(false);
                     sessionStorage.removeItem("clipboard");
                     isSendingRef.current = false;
@@ -155,13 +205,13 @@ export default function App() {
         sessionStorage.removeItem("clipboard");
         setHistory([]);
         setClipboard("");
-        setFileUrl(null);
+        setFiles([]);
     };
 
     // ─── File upload ─────────────────────────────────────────────────────────────
     const uploadFileHandler = async (file, type = "file") => {
         if (!file) return toast.error("Please select a file to upload");
-        if (file.size > 10 * 1024 * 1024) return toast.error("File size exceeds 10MB. Please upload a smaller file.");
+        if (file.size > MAX_FILE) return toast.error("File size exceeds 15MB. Please upload a smaller file.");
 
         const toastId = toast.loading("Uploading file...");
 
@@ -171,8 +221,8 @@ export default function App() {
         }
 
         try {
-            const attachment = await uploadFile(file);
-            setFileUrl(attachment);
+            const [attachment] = await uploadFiles([file]);
+            setFiles((prev) => [...prev, attachment]);
             toast.success("File uploaded successfully!", { id: toastId });
         } catch {
             toast.error("An error occurred while uploading file", { id: toastId });
@@ -181,7 +231,7 @@ export default function App() {
 
     // ─── Send clipboard ───────────────────────────────────────────────────────────
     const updateClipboard = async () => {
-        if (!clipboard && !fileUrl) return toast.error("Please enter some text to update clipboard");
+        if (!clipboard && files.length === 0) return toast.error("Please enter some text to update clipboard");
         if (clipboard.length > MAX_TEXT) return toast.error(`Clipboard content is too long. Please keep it under ${MAX_TEXT} characters.`);
 
         setIsSending(true);
@@ -199,11 +249,11 @@ export default function App() {
             const entry = await createEntry(code, {
                 content: clipboard,
                 sensitive: isSensitive,
-                file: fileUrl,
+                files,
             });
 
             setHistory((prev) => [entry, ...prev.filter((e) => e.id !== entry.id)]);
-            setFileUrl(null);
+            setFiles([]);
             setClipboard("");
             sessionStorage.removeItem("clipboard");
             setIsSensitive(false);
@@ -236,16 +286,16 @@ export default function App() {
             return;
         }
         setClipboard(item.content);
-        if (item.fileKey) {
-            setFileUrl({
-                key: item.fileKey,
-                name: item.fileName || "file",
-                type: item.fileType || "application/octet-stream",
-                size: 0,
-                url: item.fileUrl || "",
-            });
+        if (item.files && item.files.length > 0) {
+            setFiles(item.files.map((f) => ({
+                key: f.key,
+                name: f.name,
+                type: f.type,
+                size: f.size,
+                url: f.url,
+            })));
         } else {
-            setFileUrl(null);
+            setFiles([]);
         }
         setIsSensitive(item.sensitive);
         toast.success("Ready to edit!", { id: toastId });
@@ -379,8 +429,8 @@ export default function App() {
                     setClipboard={setClipboard}
                     isSensitive={isSensitive}
                     setIsSensitive={setIsSensitive}
-                    fileUrl={fileUrl}
-                    setFileUrl={setFileUrl}
+                    files={files}
+                    setFiles={setFiles}
                     isDarkMode={isDarkMode}
                     textareaRef={textareaRef}
                     onUploadFile={uploadFileHandler}
@@ -399,6 +449,8 @@ export default function App() {
                 onDelete={handleDeleteOne}
                 onDeleteAll={deleteAll}
             />
+
+            <QrDock sessionCode={sessionCode} isDarkMode={isDarkMode} />
 
             {/* Footer */}
             <footer className={`mt-6 text-center text-xs ${dm ? "text-gray-600" : "text-gray-400"}`}>

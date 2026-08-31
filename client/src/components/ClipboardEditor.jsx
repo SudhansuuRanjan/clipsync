@@ -6,8 +6,8 @@ export default function ClipboardEditor({
     setClipboard,
     isSensitive,
     setIsSensitive,
-    fileUrl,
-    setFileUrl,
+    files,
+    setFiles,
     isDarkMode,
     textareaRef,
     onUploadFile,
@@ -26,14 +26,14 @@ export default function ClipboardEditor({
             ? "bg-[#0d1117] border-[#30363d] text-gray-200 placeholder-gray-600 focus:ring-blue-500/40 focus:border-blue-500/60"
             : "bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400 focus:ring-blue-300 focus:border-blue-400"}`;
 
-    const handleClearFile = () => {
-        setFileUrl(null);
+    const handleRemoveFile = (key) => {
+        setFiles((prev) => prev.filter((f) => f.key !== key));
         toast.success("File removed successfully!");
     };
 
     const handleClear = () => {
         setClipboard("");
-        setFileUrl(null);
+        setFiles([]);
         toast.success("Clipboard cleared successfully!");
     };
 
@@ -72,30 +72,34 @@ export default function ClipboardEditor({
             <div className="flex flex-wrap gap-1.5">
                 <input
                     type="file"
+                    multiple
                     className="hidden"
                     id="attachfile"
                     accept="application/msword, application/vnd.ms-excel, application/vnd.ms-powerpoint, text/plain, application/pdf, image/*"
                     onChange={async (e) => {
-                        await onUploadFile(e.target.files[0]);
+                        const selected = Array.from(e.target.files || []);
+                        for (const file of selected) await onUploadFile(file, "file");
                         e.target.value = null;
                     }}
                 />
                 <label htmlFor="attachfile" className={pillClass}>
-                    <Paperclip className="text-emerald-500" size={14} /> Attach File
+                    <Paperclip className="text-emerald-500" size={14} /> Attach Files
                 </label>
 
                 <input
                     type="file"
+                    multiple
                     className="hidden"
                     id="attachimage"
                     accept="image/*"
                     onChange={async (e) => {
-                        await onUploadFile(e.target.files[0], "image");
+                        const selected = Array.from(e.target.files || []);
+                        for (const file of selected) await onUploadFile(file, "image");
                         e.target.value = null;
                     }}
                 />
                 <label htmlFor="attachimage" className={pillClass}>
-                    <FileImage className="text-rose-500" size={14} /> Attach Image
+                    <FileImage className="text-rose-500" size={14} /> Attach Images
                 </label>
 
                 <input
@@ -107,7 +111,10 @@ export default function ClipboardEditor({
                         const file = e.target.files[0];
                         if (!file) return;
                         const reader = new FileReader();
-                        reader.onload = () => setClipboard(reader.result);
+                        reader.onload = () => {
+                            setClipboard(String(reader.result || ""));
+                            sessionStorage.setItem("clipboard", String(reader.result || ""));
+                        };
                         reader.readAsText(file);
                         toast.success("File selected successfully!");
                         e.target.value = null;
@@ -118,15 +125,19 @@ export default function ClipboardEditor({
                 </label>
             </div>
 
-            {/* File preview */}
-            {fileUrl && (
-                <div className={`flex gap-2 items-center p-2 py-2 rounded-xl text-sm
-                    ${dm ? "bg-[#1e2530] border border-[#30363d]" : "bg-gray-100 border border-gray-200"}`}>
-                    <FileUp size={16} className="text-blue-500 shrink-0" />
-                    <p className={`flex-1 truncate ${dm ? "text-gray-300" : "text-gray-700"}`}>{fileUrl.name}</p>
-                    <button className="text-red-400 hover:text-red-500 active:scale-95 transition" onClick={handleClearFile}>
-                        <Trash2 size={16} />
-                    </button>
+            {/* File previews */}
+            {files.length > 0 && (
+                <div className="flex flex-col gap-2">
+                    {files.map((f) => (
+                        <div key={f.key} className={`flex gap-2 items-center p-2 py-2 rounded-xl text-sm
+                            ${dm ? "bg-[#1e2530] border border-[#30363d]" : "bg-gray-100 border border-gray-200"}`}>
+                            <FileUp size={16} className="text-blue-500 shrink-0" />
+                            <p className={`flex-1 truncate ${dm ? "text-gray-300" : "text-gray-700"}`}>{f.name}</p>
+                            <button className="text-red-400 hover:text-red-500 active:scale-95 transition" onClick={() => handleRemoveFile(f.key)}>
+                                <Trash2 size={16} />
+                            </button>
+                        </div>
+                    ))}
                 </div>
             )}
 

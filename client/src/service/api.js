@@ -34,9 +34,12 @@ export async function createEntry(code, input) {
         body: JSON.stringify({
             content: input.content,
             sensitive: input.sensitive,
-            fileName: input.file?.name ?? null,
-            fileKey: input.file?.key ?? null,
-            fileType: input.file?.type ?? null,
+            files: (input.files ?? []).map((f) => ({
+                name: f.name,
+                key: f.key,
+                type: f.type,
+                size: f.size,
+            })),
         }),
     });
     return handle(res);
@@ -56,10 +59,30 @@ export async function clearEntries(code) {
     await handle(res);
 }
 
-export async function uploadFile(file) {
+export async function uploadFiles(files) {
     const form = new FormData();
-    form.append("file", file);
+    for (const file of files) {
+        form.append("files", file);
+    }
     const res = await fetch(`${API}/api/files`, { method: "POST", body: form });
+    return handle(res);
+}
+
+export async function createPair(sessionCode) {
+    const res = await fetch(`${API}/api/pairing/create`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionCode }),
+    });
+    return handle(res);
+}
+
+export async function claimPair(pair) {
+    const res = await fetch(`${API}/api/pairing/claim`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pair }),
+    });
     return handle(res);
 }
 
