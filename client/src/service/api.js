@@ -3,6 +3,13 @@
 const API = (import.meta.env.VITE_API_BASE || "https://clipsync.spectre7.workers.dev").replace(/\/$/, "");
 const WS = API.replace(/^http/, "ws");
 
+// Resolve a server-relative file URL (/files/<key>) against the Worker origin.
+export function resolveFileUrl(url) {
+    if (!url) return "#";
+    if (/^https?:\/\//i.test(url)) return url;
+    return `${API}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
 async function handle(res) {
     if (!res.ok) {
         const body = await res.json().catch(() => ({}));

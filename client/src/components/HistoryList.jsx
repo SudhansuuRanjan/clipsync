@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Copy, Edit, FileImage, Info, Paperclip, Search, Trash2, Trash2Icon } from "lucide-react";
+import { resolveFileUrl } from "../service/api";
 import { convertLinksToAnchor, displayFileName, formatTimestamp, isImageType, plainTextPreview } from "../utils";
 
 const PAGE_SIZE = 10;
@@ -44,7 +45,7 @@ function HistoryItem({ item, isDarkMode, isExpanded, onToggle, onEdit, onCopy, o
                                 ? <FileImage size={12} className="text-rose-500" />
                                 : <Paperclip size={12} className="text-emerald-500" />}
                             <a
-                                href={f.url}
+                                href={resolveFileUrl(f.url)}
                                 className="text-blue-400 hover:underline truncate max-w-[200px]"
                                 target="_blank"
                                 rel="noreferrer"
