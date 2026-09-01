@@ -11,6 +11,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       workbox: {
         globPatterns: ["**/*"],
+        // Don't let the SPA navigation fallback hijack file downloads or API
+        // calls. /files/* are served by the Worker, not by the static assets.
+        navigateFallbackDenylist: [/^\/files\//, /^\/api\//, /^\/ws/],
       },
       includeAssets: [
         "**/*",
