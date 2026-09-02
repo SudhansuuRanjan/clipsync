@@ -338,17 +338,11 @@ export default function App() {
 
     // ─── Visitor counter (Workers KV-backed, cookie-deduped) ─────────────────────
     useEffect(() => {
-        const visited = document.cookie.split(";").some((c) => c.includes("visited"));
         (async () => {
             try {
                 const stats = await trackStats();
                 setTotalVisitor(stats.total);
                 setUniqueVisitor(stats.unique);
-                if (!visited) {
-                    const date = new Date();
-                    date.setTime(date.getTime() + 30 * 24 * 60 * 60 * 1000);
-                    document.cookie = `visited=true; path=/; expires=${date.toUTCString()}; sameSite=strict; secure`;
-                }
             } catch {
                 try {
                     const stats = await getStats();

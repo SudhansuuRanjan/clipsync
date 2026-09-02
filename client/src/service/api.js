@@ -99,7 +99,7 @@ export async function getStats() {
 }
 
 export async function trackStats() {
-    const res = await fetch(`${API}/api/stats/track`, { method: "POST" });
+    const res = await fetch(`${API}/api/stats/track`, { method: "POST", credentials: "include" });
     return handle(res);
 }
 
